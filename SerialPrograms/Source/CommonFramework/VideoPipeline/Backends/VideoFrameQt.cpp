@@ -40,8 +40,34 @@ QVideoFrameFormat::PixelFormat VideoFormat_to_QVideoFrameFormat(VideoFormat form
         return QVideoFrameFormat::Format_P010;
     case VideoFormat::MJPEG:
         return QVideoFrameFormat::Format_Jpeg;
+    case VideoFormat::H264:
+    case VideoFormat::HEVC:
+    case VideoFormat::VP9:
+    case VideoFormat::AV1:
+        //  Compressed stream formats. There is no pixel format to request: the
+        //  decoder chooses what it hands back.
+        return QVideoFrameFormat::Format_Invalid;
     }
     return QVideoFrameFormat::Format_Invalid;
+}
+
+VideoFormat QMediaFormat_to_VideoFormat(QMediaFormat::VideoCodec codec){
+    switch (codec){
+    case QMediaFormat::VideoCodec::MotionJPEG:
+        return VideoFormat::MJPEG;
+    case QMediaFormat::VideoCodec::H264:
+        return VideoFormat::H264;
+    case QMediaFormat::VideoCodec::H265:
+        return VideoFormat::HEVC;
+    case QMediaFormat::VideoCodec::VP9:
+        return VideoFormat::VP9;
+    case QMediaFormat::VideoCodec::AV1:
+        return VideoFormat::AV1;
+    default:
+        //  Everything else decodes fine, we just have no name for it. VP8
+        //  belongs here once there is a working stream to confirm it with.
+        return VideoFormat::OTHER;
+    }
 }
 
 

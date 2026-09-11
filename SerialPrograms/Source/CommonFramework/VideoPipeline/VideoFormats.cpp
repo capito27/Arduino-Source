@@ -18,6 +18,10 @@ const EnumDropdownDatabase<VideoFormat>& VideoFormat_database(){
         {VideoFormat::NV12,     "NV12",     "NV12"},
         {VideoFormat::P010,     "P010",     "P010"},
         {VideoFormat::MJPEG,    "MJPEG",    "MJPEG"},
+        {VideoFormat::H264,     "H264",     "H.264"},
+        {VideoFormat::HEVC,     "HEVC",     "H.265 / HEVC"},
+        {VideoFormat::VP9,      "VP9",      "VP9"},
+        {VideoFormat::AV1,      "AV1",      "AV1"},
     };
     return database;
 }
