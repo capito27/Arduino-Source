@@ -8,6 +8,7 @@
 #define PokemonAutomation_AudioPipeline_AudioPassthroughPair_H
 
 #include "AudioInfo.h"
+#include "AudioStreamInfo.h"
 
 namespace PokemonAutomation{
 
@@ -42,10 +43,15 @@ public:
         const AudioDeviceInfo& input, AudioChannelFormat format,
         const AudioDeviceInfo& output, double output_volume
     ) = 0;
+    virtual void reset(
+        const AudioStreamInfo& input,
+        const AudioDeviceInfo& output, double output_volume
+    ) = 0;
 
     virtual void clear_audio_source() = 0;
     virtual void set_audio_source(const std::string& file) = 0;
     virtual void set_audio_source(const AudioDeviceInfo& device, AudioChannelFormat format) = 0;
+    virtual void set_audio_source(const AudioStreamInfo& stream) = 0;
 
     virtual void clear_audio_sink() = 0;
     virtual void set_audio_sink(const AudioDeviceInfo& device, double volume) = 0;
