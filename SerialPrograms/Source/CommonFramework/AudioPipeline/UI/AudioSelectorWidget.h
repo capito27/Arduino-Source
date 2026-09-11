@@ -26,20 +26,31 @@ public:
     ~AudioSelectorWidget();
 
 private:
-    void build_input_list(const std::string& file, const AudioDeviceInfo& device);
+    void build_input_list(const std::string& file, const AudioDeviceInfo& device, const AudioStreamInfo& stream);
     void build_output_list(const AudioDeviceInfo& device);
 
     void refresh_all();
-    void refresh_formats(const std::string& file, const AudioDeviceInfo& device, AudioChannelFormat format);
-    void refresh_input_device(const std::string& file, const AudioDeviceInfo& device);
+    void refresh_formats(const std::string& file, const AudioDeviceInfo& device, const AudioStreamInfo& stream, AudioChannelFormat format);
+    void refresh_input_device(const std::string& file, const AudioDeviceInfo& device, const AudioStreamInfo& stream);
     void refresh_output_device(const AudioDeviceInfo& device);
     void refresh_volume(double volume);
     void refresh_display(AudioOption::AudioDisplayType display);
 
-    virtual void post_input_change(const std::string& file, const AudioDeviceInfo& device, AudioChannelFormat format) override;
+    virtual void post_input_change(
+        const std::string& file,
+        const AudioDeviceInfo& device,
+        const AudioStreamInfo& stream,
+        AudioChannelFormat format
+    ) override;
+
     virtual void post_output_change(const AudioDeviceInfo& device) override;
     virtual void post_volume_change(double volume) override;
     virtual void post_display_change(AudioOption::AudioDisplayType display) override;
+
+    //  Opens the setup dialog and applies the result. Used both by selecting
+    //  the "Network Stream" entry and by "Reset Audio" on a configured stream.
+    void run_stream_setup();
+
 
 private:
     AudioSession& m_session;
@@ -59,6 +70,10 @@ private:
 
     std::vector<AudioDeviceInfo> m_input_audios;
     std::vector<AudioChannelFormat> m_input_formats;
+
+    //  The stream entry, if one is configured. Kept so it can be re-selected
+    //  without reopening the setup dialog.
+    AudioStreamInfo m_input_stream;
 
     std::vector<AudioDeviceInfo> m_output_audios;
 

@@ -68,6 +68,14 @@ void AudioPassthroughPairQtThread::reset(
     AudioPassthroughPairQt* body = m_body;
     body->reset(input, format, output, output_volume);
 }
+void AudioPassthroughPairQtThread::reset(
+    const AudioStreamInfo& input,
+    const AudioDeviceInfo& output, double output_volume
+){
+    auto scope_check = m_sanitizer.check_scope();
+    AudioPassthroughPairQt* body = m_body;
+    body->reset(input, output, output_volume);
+}
 void AudioPassthroughPairQtThread::clear_audio_source(){
     auto scope_check = m_sanitizer.check_scope();
     AudioPassthroughPairQt* body = m_body;
@@ -82,6 +90,11 @@ void AudioPassthroughPairQtThread::set_audio_source(const AudioDeviceInfo& devic
     auto scope_check = m_sanitizer.check_scope();
     AudioPassthroughPairQt* body = m_body;
     body->set_audio_source(device, format);
+}
+void AudioPassthroughPairQtThread::set_audio_source(const AudioStreamInfo& stream){
+    auto scope_check = m_sanitizer.check_scope();
+    AudioPassthroughPairQt* body = m_body;
+    body->set_audio_source(stream);
 }
 void AudioPassthroughPairQtThread::clear_audio_sink(){
     auto scope_check = m_sanitizer.check_scope();

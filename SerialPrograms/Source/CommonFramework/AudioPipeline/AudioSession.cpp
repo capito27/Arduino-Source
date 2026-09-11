@@ -66,6 +66,7 @@ void AudioSession::save(AudioOption& option) const{
     std::lock_guard<Mutex> lg(m_lock);
     option.m_input_file     = m_option.m_input_file;
     option.m_input_device   = m_option.m_input_device;
+    option.m_input_stream   = m_option.m_input_stream;
     option.m_input_format   = m_option.m_input_format;
     option.m_output_device  = m_option.m_output_device;
     option.m_volume         = m_option.m_volume;
@@ -78,6 +79,7 @@ void AudioSession::load(const AudioOption& option){
 
         m_option.m_input_file       = option.m_input_file;
         m_option.m_input_device     = option.m_input_device;
+        m_option.m_input_stream     = option.m_input_stream;
         m_option.m_input_format     = option.m_input_format;
         m_option.m_output_device    = option.m_output_device;
         m_option.m_volume           = option.m_volume;
@@ -86,6 +88,9 @@ void AudioSession::load(const AudioOption& option){
         if (!m_option.m_input_file.empty()){
             sanitize_format();
             m_devices->set_audio_source(m_option.m_input_file);
+        }else if (m_option.m_input_stream){
+            sanitize_format();
+            m_devices->set_audio_source(m_option.m_input_stream);
         }else if (sanitize_format()){
             m_devices->set_audio_source(m_option.m_input_device, m_option.m_input_format);
         }else{
@@ -103,6 +108,10 @@ void AudioSession::load(const AudioOption& option){
 std::pair<std::string, AudioDeviceInfo> AudioSession::input_device() const{
     std::lock_guard<Mutex> lg(m_lock);
     return {m_option.input_file(), m_option.m_input_device};
+}
+AudioStreamInfo AudioSession::input_stream() const{
+    std::lock_guard<Mutex> lg(m_lock);
+    return m_option.m_input_stream;
 }
 AudioChannelFormat AudioSession::input_format() const{
     std::lock_guard<Mutex> lg(m_lock);
@@ -129,6 +138,7 @@ void AudioSession::clear_audio_input(){
     m_devices->clear_audio_source();
     m_option.m_input_file.clear();
     m_option.m_input_device = AudioDeviceInfo();
+    m_option.m_input_stream = AudioStreamInfo();
     signal_post_input_change();
 
     //  We need to do this at the end.
@@ -143,6 +153,7 @@ void AudioSession::set_audio_input(std::string file){
     std::lock_guard<Mutex> lg(m_lock);
     signal_pre_input_change();
     m_option.m_input_file = std::move(file);
+    m_option.m_input_stream = AudioStreamInfo();
     sanitize_format();
     m_devices->set_audio_source(m_option.m_input_file);
     signal_post_input_change();
@@ -152,6 +163,7 @@ void AudioSession::set_audio_input(AudioDeviceInfo info){
     m_logger.log("Setting audio input to: " + info.display_name());
     signal_pre_input_change();
     m_option.m_input_file.clear();
+    m_option.m_input_stream = AudioStreamInfo();
     m_option.m_input_device = std::move(info);
     m_option.m_input_format = AudioChannelFormat::NONE;
     if (sanitize_format()){
@@ -161,13 +173,36 @@ void AudioSession::set_audio_input(AudioDeviceInfo info){
     }
     signal_post_input_change();
 }
+void AudioSession::set_audio_input(AudioStreamInfo info){
+    std::lock_guard<Mutex> lg(m_lock);
+    m_logger.log("Setting audio input to: " + info.display_name());
+    signal_pre_input_change();
+    m_option.m_input_file.clear();
+    m_option.m_input_device = AudioDeviceInfo();
+    m_option.m_input_stream = std::move(info);
+    m_option.m_input_format = m_option.m_input_stream.format();
+    if (m_option.m_input_stream){
+        m_devices->set_audio_source(m_option.m_input_stream);
+    }else{
+        m_devices->clear_audio_source();
+    }
+    signal_post_input_change();
+}
 void AudioSession::set_format(AudioChannelFormat format){
     std::lock_guard<Mutex> lg(m_lock);
     signal_pre_input_change();
     m_option.m_input_format = format;
+    if (m_option.m_input_stream){
+        //  The declared format is part of a stream's identity, so it moves with it.
+        m_option.m_input_stream = AudioStreamInfo(
+            m_option.m_input_stream.url(), format, m_option.m_input_stream.name()
+        );
+    }
     if (sanitize_format()){
         if (!m_option.m_input_file.empty()){
             m_devices->set_audio_source(m_option.m_input_file);
+        }else if (m_option.m_input_stream){
+            m_devices->set_audio_source(m_option.m_input_stream);
         }else{
             m_devices->set_audio_source(m_option.m_input_device, m_option.m_input_format);
         }
@@ -217,6 +252,11 @@ bool AudioSession::sanitize_format(){
         m_option.m_input_format = AudioChannelFormat::NONE;
         return true;
     }
+    if (m_option.m_input_stream){
+        //  Nothing to validate against. The user told us what the stream is.
+        m_option.m_input_format = m_option.m_input_stream.format();
+        return m_option.m_input_format != AudioChannelFormat::NONE;
+    }
     AudioDeviceInfo& info = m_option.m_input_device;
     const std::vector<AudioChannelFormat>& supported_formats = info.supported_formats();
     int preferred_index = info.preferred_format_index();
@@ -248,6 +288,7 @@ void AudioSession::signal_post_input_change(){
         &StateListener::post_input_change,
         m_option.input_file(),
         m_option.input_device(),
+        m_option.input_stream(),
         m_option.input_format()
     );
 }
@@ -265,6 +306,11 @@ void AudioSession::reset(){
 //        cout << "AudioSession::reset() - file: " << m_option.m_input_file << " - " << m_option.m_input_file.size() << endl;
         m_devices->reset(
             m_option.m_input_file,
+            m_option.m_output_device, m_option.m_volume
+        );
+    }else if (m_option.m_input_stream){
+        m_devices->reset(
+            m_option.m_input_stream,
             m_option.m_output_device, m_option.m_volume
         );
     }else{
@@ -293,7 +339,7 @@ void AudioSession::on_fft(size_t sample_rate, std::shared_ptr<const AlignedVecto
 }
 void AudioSession::on_watchdog_timeout(){
 //    m_logger.log("AudioSession::on_watchdog_timeout()", COLOR_RED);
-    if (m_option.m_input_file.empty() && !m_option.m_input_device){
+    if (m_option.m_input_file.empty() && !m_option.m_input_device && !m_option.m_input_stream){
         return;
     }
 

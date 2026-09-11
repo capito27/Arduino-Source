@@ -18,6 +18,7 @@
 #include "Common/Cpp/Concurrency/SpinLock.h"
 #include "CommonFramework/AudioPipeline/AudioInfo.h"
 #include "CommonFramework/AudioPipeline/AudioStream.h"
+#include "CommonFramework/AudioPipeline/AudioStreamInfo.h"
 
 namespace PokemonAutomation{
 
@@ -25,6 +26,7 @@ class Logger;
 class AudioStreamToFloat;
 class AudioInputFile;
 class AudioInputDevice;
+class AudioInputStream;
 
 
 class AudioSource{
@@ -40,6 +42,9 @@ public:
 
     //  Read from an audio input device. (i.e. capture card)
     AudioSource(Logger& logger, const AudioDeviceInfo& device, AudioChannelFormat format, float volume_multiplier);
+
+    //  Read from a raw PCM stream served over the network.
+    AudioSource(Logger& logger, const AudioStreamInfo& stream, float volume_multiplier);
 
     size_t sample_rate() const{ return m_sample_rate; }
     size_t channels() const{ return m_channels; }
@@ -62,6 +67,7 @@ private:
 
     std::unique_ptr<AudioInputFile> m_input_file;
     std::unique_ptr<AudioInputDevice> m_input_device;
+    std::unique_ptr<AudioInputStream> m_input_stream;
 
     ListenerSet<AudioFloatStreamListener> m_listeners;
 

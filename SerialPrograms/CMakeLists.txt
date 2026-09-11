@@ -103,6 +103,7 @@ if(WIN32 AND QT_DEPLOY_FILES)
             Widgets
             SerialPort
             Multimedia
+            Network
             MultimediaWidgets
             OpenGLWidgets
             Qml
@@ -115,6 +116,7 @@ if(WIN32 AND QT_DEPLOY_FILES)
             Widgets
             SerialPort
             Multimedia
+            Network
             MultimediaWidgets
             OpenGLWidgets
             Qml
@@ -152,6 +154,7 @@ else()
         Widgets
         SerialPort
         Multimedia
+        Network
         MultimediaWidgets
         OpenGLWidgets
         Qml
@@ -261,6 +264,7 @@ function(apply_common_target_properties target_name)
         Qt${QT_MAJOR}::SerialPort
         Qt${QT_MAJOR}::Multimedia
         Qt${QT_MAJOR}::MultimediaWidgets
+        Qt${QT_MAJOR}::Network
         Qt${QT_MAJOR}::OpenGLWidgets
         Qt${QT_MAJOR}::Qml
         Qt${QT_MAJOR}::Quick

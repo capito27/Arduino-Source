@@ -162,11 +162,16 @@ void StreamHistorySession::pre_input_change(){
     WriteSpinLock lg(data.m_lock);
     clear();
 }
-void StreamHistorySession::post_input_change(const std::string& file, const AudioDeviceInfo& device, AudioChannelFormat format){
+void StreamHistorySession::post_input_change(
+    const std::string& file,
+    const AudioDeviceInfo& device,
+    const AudioStreamInfo& stream,
+    AudioChannelFormat format
+){
 //    cout << "post_input_change()" << endl;
     Data& data = *m_data;
     WriteSpinLock lg(data.m_lock);
-    if (device){
+    if (device || stream){
         data.m_audio_format = format;
     }else{
         data.m_audio_format = AudioChannelFormat::NONE;

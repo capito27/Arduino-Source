@@ -39,10 +39,15 @@ public:
         const AudioDeviceInfo& input, AudioChannelFormat format,
         const AudioDeviceInfo& output, double output_volume
     ) override;
+    virtual void reset(
+        const AudioStreamInfo& input,
+        const AudioDeviceInfo& output, double output_volume
+    ) override;
 
     virtual void clear_audio_source() override;
     virtual void set_audio_source(const std::string& file) override;
     virtual void set_audio_source(const AudioDeviceInfo& device, AudioChannelFormat format) override;
+    virtual void set_audio_source(const AudioStreamInfo& stream) override;
 
     virtual void clear_audio_sink() override;
     virtual void set_audio_sink(const AudioDeviceInfo& device, double volume) override;

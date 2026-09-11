@@ -13,11 +13,15 @@ using NativeAudioSource = QAudioInput;
 using NativeAudioSource = QAudioSource;
 #endif
 
+#include <QUrl>
+#include <QThread>
+#include <QTcpSocket>
 #include "Common/Cpp/Exceptions.h"
 #include "Common/Cpp/PrettyPrint.h"
 #include "Common/Cpp/Time.h"
 //#include "Common/Cpp/StreamConverters.h"
 #include "CommonFramework/AudioPipeline/AudioStream.h"
+#include "CommonFramework/AudioPipeline/AudioStreamInfo.h"
 #include "CommonFramework/AudioPipeline/Tools/AudioFormatUtils.h"
 #include "AudioFileLoader.h"
 #include "AudioSource.h"
@@ -98,6 +102,170 @@ private:
 
 
 
+
+//  Read raw PCM from a stream served over TCP.
+//
+//  The stream is headerless, so the sample rate, channel count and sample format
+//  cannot be read off it. They must match the format we are given.
+//
+//  The socket gets its own thread. Qt hands us the samples from an audio device
+//  on an internal thread of its own, and everything downstream of push_bytes()
+//  - the FFT, the passthrough to the speakers, the inference listeners - was
+//  written against that. A socket owned by the UI thread would run all of it
+//  there instead, at ~190 wakeups a second.
+class AudioInputStreamWorker final : public QObject{
+public:
+    AudioInputStreamWorker(
+        Logger& logger, AudioStreamToFloat& reader,
+        const QAudioFormat& format, const QString& host, quint16 port
+    )
+        : m_logger(logger)
+        , m_reader(reader)
+        , m_frame_size(format.bytesPerFrame())
+        , m_bytes_per_second((qint64)format.bytesPerFrame() * format.sampleRate())
+        , m_max_backlog(m_bytes_per_second * MAX_BACKLOG_MILLISECONDS / 1000)
+        , m_buffer(65536)
+        , m_host(host)
+        , m_port(port)
+    {}
+
+    //  Both of these must run on the worker thread.
+    void open(){
+        m_socket = std::make_unique<QTcpSocket>();
+        m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+
+        //  Bound how much the kernel is allowed to hoard for us.
+        m_socket->setReadBufferSize(2 * m_max_backlog);
+
+        connect(
+            m_socket.get(), &QIODevice::readyRead,
+            this, [this]{ on_ready_read(); }
+        );
+        connect(
+            m_socket.get(), &QAbstractSocket::errorOccurred,
+            this, [this](QAbstractSocket::SocketError){
+                m_logger.log("AudioInputStream(): " + m_socket->errorString().toStdString(), COLOR_RED);
+            }
+        );
+
+        m_connect_time = current_time();
+        m_socket->connectToHost(m_host, m_port);
+    }
+    void close(){
+        m_socket.reset();
+    }
+
+private:
+    void on_ready_read(){
+        if (m_first_bytes){
+            m_first_bytes = false;
+            double seconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                current_time() - m_connect_time
+            ).count() / 1000.;
+            m_logger.log("First audio bytes after " + tostr_fixed(seconds, 3) + " seconds", COLOR_CYAN);
+        }
+
+        //  These servers queue for a slow client instead of dropping, so any
+        //  hiccup would otherwise leave us permanently behind. Discard all but
+        //  the newest samples. Raw PCM can be cut at any frame boundary.
+        qint64 available = m_socket->bytesAvailable();
+        if (available > m_max_backlog){
+            qint64 skip = available - m_max_backlog;
+            skip -= skip % m_frame_size;    //  Never cut mid-frame or we swap the channels.
+            m_socket->skip(skip);
+            m_dropped_bytes += skip;
+        }else if (m_dropped_bytes != 0){
+            //  Caught up. One stall spans many reads, so it is only worth
+            //  reporting once we are live again.
+            m_logger.log(
+                "Fell behind on the audio stream. Dropped " +
+                std::to_string(m_dropped_bytes * 1000 / m_bytes_per_second) + " ms to catch up.",
+                COLOR_ORANGE
+            );
+            m_dropped_bytes = 0;
+        }
+
+        while (true){
+            qint64 bytes = m_socket->read(m_buffer.data(), (qint64)m_buffer.size());
+            if (bytes <= 0){
+                break;
+            }
+            m_reader.push_bytes(m_buffer.data(), (size_t)bytes);
+        }
+    }
+
+private:
+    //  How far behind live we let ourselves fall before discarding.
+    static const qint64 MAX_BACKLOG_MILLISECONDS = 100;
+
+    Logger& m_logger;
+    AudioStreamToFloat& m_reader;
+    qint64 m_frame_size;
+    qint64 m_bytes_per_second;
+    qint64 m_max_backlog;
+    std::vector<char> m_buffer;
+    QString m_host;
+    quint16 m_port;
+
+    bool m_first_bytes = true;
+    WallClock m_connect_time;
+    qint64 m_dropped_bytes = 0;
+
+    std::unique_ptr<QTcpSocket> m_socket;
+};
+
+
+//  Owns the worker and the thread it runs on.
+class AudioInputStream final{
+public:
+    ~AudioInputStream(){
+        if (m_worker){
+            if (m_thread.isRunning()){
+                //  The socket was made on the worker thread and has to be shut
+                //  down there. Block so that nothing is still reading into the
+                //  reader once we return.
+                QMetaObject::invokeMethod(
+                    m_worker.get(),
+                    [this]{ m_worker->close(); },
+                    Qt::BlockingQueuedConnection
+                );
+            }
+            m_thread.quit();
+            m_thread.wait();
+        }
+    }
+    AudioInputStream(
+        Logger& logger, AudioStreamToFloat& reader,
+        const std::string& url, const QAudioFormat& format
+    ){
+        logger.log("AudioInputStream(): " + url + " - " + dump_audio_format(format));
+
+        QUrl parsed(QString::fromStdString(url));
+        if (!parsed.isValid() || parsed.host().isEmpty() || parsed.port() < 0){
+            logger.log("Invalid stream URL: " + url, COLOR_RED);
+            return;
+        }
+
+        m_worker.reset(new AudioInputStreamWorker(
+            logger, reader, format, parsed.host(), (quint16)parsed.port()
+        ));
+        m_worker->moveToThread(&m_thread);
+
+        //  Named so it is identifiable in a debugger or a hang dump.
+        m_thread.setObjectName("AudioInputStream");
+        m_thread.start();
+
+        //  Runs once the thread's event loop is up.
+        QMetaObject::invokeMethod(m_worker.get(), [this]{ m_worker->open(); });
+    }
+
+private:
+    QThread m_thread;
+    std::unique_ptr<AudioInputStreamWorker> m_worker;
+};
+
+
+
 class AudioSource::InternalListener : public AudioFloatStreamListener{
 public:
     InternalListener(AudioSource& parent)
@@ -153,6 +321,16 @@ AudioSource::AudioSource(Logger& logger, const AudioDeviceInfo& device, AudioCha
 
     init(format, stream_format, volume_multiplier);
     m_input_device = std::make_unique<AudioInputDevice>(logger, *m_reader, native_info, native_format);
+}
+AudioSource::AudioSource(Logger& logger, const AudioStreamInfo& stream, float volume_multiplier){
+    //  The stream carries no header, so we tell the reader what the user said
+    //  the stream is instead of asking the stream.
+    QAudioFormat native_format;
+    native_format.setSampleFormat(QAudioFormat::Int16);
+    set_format(native_format, stream.format());
+
+    init(stream.format(), AudioSampleFormat::SINT16, volume_multiplier);
+    m_input_stream = std::make_unique<AudioInputStream>(logger, *m_reader, stream.url(), native_format);
 }
 
 void AudioSource::init(AudioChannelFormat format, AudioSampleFormat stream_format, float volume_multiplier){
