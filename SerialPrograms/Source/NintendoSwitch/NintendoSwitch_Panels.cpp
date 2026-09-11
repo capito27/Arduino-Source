@@ -25,6 +25,8 @@
 #include "Programs/NintendoSwitch_FriendDelete.h"
 #include "Programs/NintendoSwitch_RecordKeyboardController.h"
 
+#include "Programs/NintendoSwitch_EndToEndLatencyTester.h"
+
 #include "Programs/NintendoSwitch_MenuStabilityTester.h"
 #include "DevPrograms/TestProgramComputer.h"
 #include "DevPrograms/TestProgramSwitch.h"
@@ -76,6 +78,7 @@ std::vector<PanelEntry> PanelListFactory::make_panels() const{
     ret.emplace_back("---- Testing ----");
     ret.emplace_back(GameConsole::make_ConsolePanel<GameConsole::BoxDraw>());
     ret.emplace_back(GameConsole::make_ConsoleProgram<GameConsole::SnapshotDumper>());
+    ret.emplace_back(make_SingleSwitchProgram<EndToEndLatencyTester>());
 
     if (STATIC_GLOBALS.DEVELOPER_MODE){
         ret.emplace_back("---- Developer Tools ----");
