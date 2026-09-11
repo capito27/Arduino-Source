@@ -35,7 +35,12 @@ public:
 
 public:
     virtual void pre_input_change() override;
-    virtual void post_input_change(const std::string& file, const AudioDeviceInfo& device, AudioChannelFormat format) override;
+    virtual void post_input_change(
+        const std::string& file,
+        const AudioDeviceInfo& device,
+        const AudioStreamInfo& stream,
+        AudioChannelFormat format
+    ) override;
 
     virtual void pre_shutdown() override;
     virtual void post_shutdown() override;
