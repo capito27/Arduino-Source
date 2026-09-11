@@ -24,6 +24,7 @@ enum class VideoSourceType{
     StillImage,
     VideoPlayback,
     Camera,
+    NetworkStream,
 };
 
 
@@ -56,6 +57,11 @@ public:
     //  do some optional additional stuff, e.g. open a file selection dialog
     //  box to continue user interaction.
     virtual void run_post_select(){};
+
+    //  Called when the user presses "Reset Video" while this source is selected.
+    //  Sources the system cannot enumerate use this to reopen their setup UI,
+    //  since re-selecting an already configured entry does not.
+    virtual void run_reconfigure(){};
     virtual JsonValue to_json() const = 0;
     virtual void load_json(const JsonValue& json) = 0;
 
