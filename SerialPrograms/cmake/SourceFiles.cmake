@@ -1316,6 +1316,8 @@ file(GLOB LIBRARY_SOURCES
     Source/NintendoSwitch/Programs/NintendoSwitch_PushJoySticks.h
     Source/NintendoSwitch/Programs/NintendoSwitch_RecordKeyboardController.cpp
     Source/NintendoSwitch/Programs/NintendoSwitch_RecordKeyboardController.h
+    Source/NintendoSwitch/Programs/NintendoSwitch_EndToEndLatencyTester.cpp
+    Source/NintendoSwitch/Programs/NintendoSwitch_EndToEndLatencyTester.h
     Source/NintendoSwitch/Programs/NintendoSwitch_TurboA.cpp
     Source/NintendoSwitch/Programs/NintendoSwitch_TurboA.h
     Source/NintendoSwitch/Programs/NintendoSwitch_TurboButton.cpp
