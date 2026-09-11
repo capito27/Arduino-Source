@@ -493,6 +493,8 @@ file(GLOB LIBRARY_SOURCES
     Source/CommonFramework/AudioPipeline/AudioSession.h
     Source/CommonFramework/AudioPipeline/AudioStream.cpp
     Source/CommonFramework/AudioPipeline/AudioStream.h
+    Source/CommonFramework/AudioPipeline/AudioStreamInfo.cpp
+    Source/CommonFramework/AudioPipeline/AudioStreamInfo.h
     Source/CommonFramework/AudioPipeline/AudioTemplate.cpp
     Source/CommonFramework/AudioPipeline/AudioTemplate.h
     Source/CommonFramework/AudioPipeline/Backends/AudioPassthroughPairQt.cpp
@@ -523,6 +525,8 @@ file(GLOB LIBRARY_SOURCES
     Source/CommonFramework/AudioPipeline/UI/AudioDisplayWidget.h
     Source/CommonFramework/AudioPipeline/UI/AudioSelectorWidget.cpp
     Source/CommonFramework/AudioPipeline/UI/AudioSelectorWidget.h
+    Source/CommonFramework/AudioPipeline/UI/NetworkAudioSetupDialog.cpp
+    Source/CommonFramework/AudioPipeline/UI/NetworkAudioSetupDialog.h
     Source/CommonFramework/Environment/HardwareValidation.cpp
     Source/CommonFramework/Environment/HardwareValidation.h
     Source/CommonFramework/Environment/HardwareValidation_arm64.tpp

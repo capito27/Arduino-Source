@@ -8,6 +8,7 @@
 #define PokemonAutomation_AudioPipeline_AudioOption_H
 
 #include "AudioInfo.h"
+#include "AudioStreamInfo.h"
 
 namespace PokemonAutomation{
 
@@ -22,6 +23,8 @@ class AudioSelectorWidget;
 class AudioOption{
     static const std::string JSON_INPUT_FILE;
     static const std::string JSON_INPUT_DEVICE;
+    static const std::string JSON_INPUT_STREAM_URL;
+    static const std::string JSON_INPUT_STREAM_NAME;
     static const std::string JSON_INPUT_FORMAT;
     static const std::string JSON_OUTPUT_DEVICE;
     static const std::string JSON_AUDIO_VIS;
@@ -41,6 +44,7 @@ public:
 
     const std::string& input_file() const{ return m_input_file; }
     const AudioDeviceInfo& input_device() const{ return m_input_device; }
+    const AudioStreamInfo& input_stream() const{ return m_input_stream; }
     AudioChannelFormat input_format() const{ return m_input_format; }
 
     const AudioDeviceInfo& output_device() const{ return m_output_device; }
@@ -62,6 +66,7 @@ private:
     friend class AudioSession;
     std::string m_input_file;
     AudioDeviceInfo m_input_device;
+    AudioStreamInfo m_input_stream;
     AudioChannelFormat m_input_format = AudioChannelFormat::NONE;
     AudioDeviceInfo m_output_device;
     AudioDisplayType m_display_type = AudioDisplayType::FREQ_BARS;

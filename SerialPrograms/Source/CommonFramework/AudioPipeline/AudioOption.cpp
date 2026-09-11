@@ -14,6 +14,8 @@ namespace PokemonAutomation{
 
 const std::string AudioOption::JSON_INPUT_FILE = "InputFile";
 const std::string AudioOption::JSON_INPUT_DEVICE = "InputDevice";
+const std::string AudioOption::JSON_INPUT_STREAM_URL = "InputStreamUrl";
+const std::string AudioOption::JSON_INPUT_STREAM_NAME = "InputStreamName";
 const std::string AudioOption::JSON_INPUT_FORMAT = "InputFormat";
 const std::string AudioOption::JSON_OUTPUT_DEVICE = "OutputDevice";
 const std::string AudioOption::JSON_AUDIO_VIS = "AudioVisualization";
@@ -58,10 +60,30 @@ void AudioOption::load_json(const JsonValue& json){
             m_input_device = AudioDeviceInfo(*str);
         }
     }
-    str = obj->get_string(JSON_INPUT_FORMAT);
-    if (str != nullptr){
+
+    const std::string* format_label = obj->get_string(JSON_INPUT_FORMAT);
+    const std::string* stream_url = obj->get_string(JSON_INPUT_STREAM_URL);
+
+    if (stream_url != nullptr && !stream_url->empty()){
+        //  A network stream carries no header, so there is nothing to validate
+        //  its format against. Take the label as written.
+        if (format_label != nullptr){
+            for (size_t c = 0; c < (size_t)AudioChannelFormat::END_LIST; c++){
+                if (AUDIO_FORMAT_LABELS[c] == *format_label){
+                    m_input_format = (AudioChannelFormat)c;
+                    break;
+                }
+            }
+        }
+        std::string stream_name;
+        str = obj->get_string(JSON_INPUT_STREAM_NAME);
+        if (str != nullptr){
+            stream_name = *str;
+        }
+        m_input_stream = AudioStreamInfo(*stream_url, m_input_format, std::move(stream_name));
+    }else if (format_label != nullptr){
         for (AudioChannelFormat format : m_input_device.supported_formats()){
-            if (AUDIO_FORMAT_LABELS[(size_t)format] == *str){
+            if (AUDIO_FORMAT_LABELS[(size_t)format] == *format_label){
                 m_input_format = format;
                 break;
             }
@@ -88,6 +110,8 @@ JsonValue AudioOption::to_json() const{
     JsonObject root;
     root[JSON_INPUT_FILE] = m_input_file;
     root[JSON_INPUT_DEVICE] = m_input_device.device_name();
+    root[JSON_INPUT_STREAM_URL] = m_input_stream.url();
+    root[JSON_INPUT_STREAM_NAME] = m_input_stream.name();
     root[JSON_INPUT_FORMAT] = AUDIO_FORMAT_LABELS[(size_t)m_input_format];
     root[JSON_OUTPUT_DEVICE] = m_output_device.device_name();
     root[JSON_AUDIO_VIS] = audioDisplayTypeToString(m_display_type);
