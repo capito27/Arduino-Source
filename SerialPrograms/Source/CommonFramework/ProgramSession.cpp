@@ -136,6 +136,10 @@ void ProgramSession::push_download_error(const std::string& message){
 
 
 void ProgramSession::load_historical_stats(){
+    if (!m_descriptor.persistent_stats()){
+        return;
+    }
+
     //  Load historical stats.
     std::unique_ptr<StatsTracker> stats = m_descriptor.make_stats();
     if (stats){
@@ -152,6 +156,9 @@ void ProgramSession::load_historical_stats(){
     }
 }
 void ProgramSession::update_historical_stats_with_current(){
+    if (!m_descriptor.persistent_stats()){
+        return;
+    }
     if (m_current_stats){
         m_logger.log("Saving historical stats...");
         bool ok = StatSet::update_file(

@@ -32,6 +32,12 @@ public:
     using PanelDescriptor::PanelDescriptor;
 
     virtual std::unique_ptr<StatsTracker> make_stats() const;
+
+    //  Whether the stats from each run are added to a running total kept on
+    //  disk. Programs that measure something rather than accumulate it have
+    //  nothing meaningful to total up across runs, so they can turn this off and
+    //  show only the run in progress.
+    virtual bool persistent_stats() const{ return true; }
 };
 
 
