@@ -13,6 +13,7 @@
 #include "VideoSources/VideoSource_Null.h"
 #include "VideoSources/VideoSource_StillImage.h"
 #include "VideoSources/VideoSource_Camera.h"
+#include "VideoSources/VideoSource_NetworkStream.h"
 
 //#include <iostream>
 //using std::cout;
@@ -26,6 +27,7 @@ const EnumStringMap<VideoSourceType> VIDEO_TYPE_STRINGS{
     {VideoSourceType::StillImage,       "Still Image"},
     {VideoSourceType::VideoPlayback,    "Video Playback"},
     {VideoSourceType::Camera,           "Camera"},
+    {VideoSourceType::NetworkStream,    "Network Stream"},
 };
 
 
@@ -56,6 +58,9 @@ std::shared_ptr<VideoSourceDescriptor> VideoSourceOption::get_descriptor_from_ca
         break;
     case VideoSourceType::Camera:
         descriptor.reset(new VideoSourceDescriptor_Camera());
+        break;
+    case VideoSourceType::NetworkStream:
+        descriptor.reset(new VideoSourceDescriptor_NetworkStream());
         break;
     default:;
         descriptor.reset(new VideoSourceDescriptor_Null());
@@ -135,6 +140,12 @@ void VideoSourceOption::load_json(const JsonValue& json){
             auto x = std::make_unique<VideoSourceDescriptor_Camera>();
             x->load_json(*params);
             m_descriptor_cache[VideoSourceType::Camera] = std::move(x);
+        }
+        params = obj->get_value(VIDEO_TYPE_STRINGS.get_string(VideoSourceType::NetworkStream));
+        if (params != nullptr){
+            auto x = std::make_unique<VideoSourceDescriptor_NetworkStream>();
+            x->load_json(*params);
+            m_descriptor_cache[VideoSourceType::NetworkStream] = std::move(x);
         }
 
         auto iter = m_descriptor_cache.find(VIDEO_TYPE_STRINGS.get_enum(*type, VideoSourceType::None));

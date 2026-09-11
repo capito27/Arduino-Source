@@ -17,6 +17,7 @@
 
 #include "CommonFramework/VideoPipeline/VideoSources/VideoSource_Null.h"
 #include "CommonFramework/VideoPipeline/VideoSources/VideoSource_Camera.h"
+#include "CommonFramework/VideoPipeline/VideoSources/VideoSource_NetworkStream.h"
 
 //#include <iostream>
 //using std::cout;
@@ -73,8 +74,15 @@ VideoSourceSelectorWidget::VideoSourceSelectorWidget(Logger& logger, VideoSessio
         m_sources_box, static_cast<void(QComboBox::*)(int)>(&QComboBox::activated),
         this, [this](int index){
             if (0 <= index && index < (int)m_sources.size()){
-                m_sources[index]->run_post_select();
-                m_session.set_source(m_sources[index]);
+                //  Hold our own reference for the duration of the call.
+                //  run_post_select() can open a modal dialog, and the video
+                //  watchdog resets the session from inside that nested event
+                //  loop. That rebuilds "m_sources" and drops the last owner of
+                //  this descriptor while we are still inside one of its
+                //  methods.
+                std::shared_ptr<VideoSourceDescriptor> source = m_sources[index];
+                source->run_post_select();
+                m_session.set_source(source);
             }else{
                 m_session.set_source(std::make_unique<VideoSourceDescriptor_Null>());
             }
@@ -114,6 +122,14 @@ VideoSourceSelectorWidget::VideoSourceSelectorWidget(Logger& logger, VideoSessio
     connect(
         m_reset_button, &QPushButton::clicked,
         this, [this](bool){
+            //  Give the current source a chance to reconfigure itself first.
+            //  Read the selection before update_source_list() rebuilds it, and
+            //  hold a reference for the same reason as above.
+            int index = m_sources_box->currentIndex();
+            if (0 <= index && index < (int)m_sources.size()){
+                std::shared_ptr<VideoSourceDescriptor> source = m_sources[index];
+                source->run_reconfigure();
+            }
             update_source_list();
             m_session.reset();
         }
@@ -137,6 +153,7 @@ void VideoSourceSelectorWidget::update_source_list(){
         m_session.get(option);
         m_sources.emplace_back(option.get_descriptor_from_cache(VideoSourceType::None));
         m_sources.emplace_back(option.get_descriptor_from_cache(VideoSourceType::StillImage));
+        m_sources.emplace_back(option.get_descriptor_from_cache(VideoSourceType::NetworkStream));
     }
 
     //  Now add all the cameras.

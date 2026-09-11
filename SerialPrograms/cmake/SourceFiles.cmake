@@ -591,12 +591,16 @@ file(GLOB LIBRARY_SOURCES
     Source/CommonFramework/VideoPipeline/Backends/VideoFrameQt.cpp
     Source/CommonFramework/VideoPipeline/Backends/VideoFrameQt.h
     Source/CommonFramework/VideoPipeline/CameraInfo.h
+    Source/CommonFramework/VideoPipeline/FrameRateEstimator.h
+    Source/CommonFramework/VideoPipeline/NetworkStreamTuning.h
     Source/CommonFramework/VideoPipeline/Stats/CpuUtilizationStats.cpp
     Source/CommonFramework/VideoPipeline/Stats/CpuUtilizationStats.h
     Source/CommonFramework/VideoPipeline/Stats/MemoryUtilizationStats.cpp
     Source/CommonFramework/VideoPipeline/Stats/MemoryUtilizationStats.h
     Source/CommonFramework/VideoPipeline/Stats/ThreadUtilizationStats.cpp
     Source/CommonFramework/VideoPipeline/Stats/ThreadUtilizationStats.h
+    Source/CommonFramework/VideoPipeline/UI/NetworkStreamSetupDialog.cpp
+    Source/CommonFramework/VideoPipeline/UI/NetworkStreamSetupDialog.h
     Source/CommonFramework/VideoPipeline/UI/VideoDisplayWidget.cpp
     Source/CommonFramework/VideoPipeline/UI/VideoDisplayWidget.h
     Source/CommonFramework/VideoPipeline/UI/VideoDisplayWindow.cpp
@@ -626,6 +630,8 @@ file(GLOB LIBRARY_SOURCES
     Source/CommonFramework/VideoPipeline/VideoSourceDescriptor.h
     Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_Camera.cpp
     Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_Camera.h
+    Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_NetworkStream.cpp
+    Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_NetworkStream.h
     Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_Null.cpp
     Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_Null.h
     Source/CommonFramework/VideoPipeline/VideoSources/VideoSource_StillImage.cpp
