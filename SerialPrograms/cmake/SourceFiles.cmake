@@ -1303,6 +1303,8 @@ file(GLOB LIBRARY_SOURCES
     Source/NintendoSwitch/Programs/NintendoSwitch_RecordKeyboardController.h
     Source/NintendoSwitch/Programs/NintendoSwitch_SnapshotDumper.cpp
     Source/NintendoSwitch/Programs/NintendoSwitch_SnapshotDumper.h
+    Source/NintendoSwitch/Programs/NintendoSwitch_EndToEndLatencyTester.cpp
+    Source/NintendoSwitch/Programs/NintendoSwitch_EndToEndLatencyTester.h
     Source/NintendoSwitch/Programs/NintendoSwitch_SwitchViewer.cpp
     Source/NintendoSwitch/Programs/NintendoSwitch_SwitchViewer.h
     Source/NintendoSwitch/Programs/NintendoSwitch_TurboA.cpp
