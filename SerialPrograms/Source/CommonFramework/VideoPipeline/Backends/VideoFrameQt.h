@@ -8,6 +8,7 @@
 #define PokemonAutomation_VideoFrame_H
 
 #include <QVideoFrame>
+#include <QMediaFormat>
 #include "Common/Cpp/Time.h"
 #include "CommonFramework/VideoPipeline/VideoFormats.h"
 
@@ -16,6 +17,11 @@ namespace PokemonAutomation{
 
 VideoFormat QVideoFrameFormat_to_VideoFormat(QVideoFrameFormat::PixelFormat format);
 QVideoFrameFormat::PixelFormat VideoFormat_to_QVideoFrameFormat(VideoFormat format);
+
+//  Map a stream's codec to the format we report. This is what the stream
+//  carries, not the pixel format the decoder produces, matching what the camera
+//  sources report. Codecs with no VideoFormat entry come back as OTHER.
+VideoFormat QMediaFormat_to_VideoFormat(QMediaFormat::VideoCodec codec);
 
 
 
