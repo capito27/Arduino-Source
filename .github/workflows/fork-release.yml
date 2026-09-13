@@ -1,0 +1,495 @@
+# Fork-only release pipeline.
+#
+# NOT AN UPSTREAM WORKFLOW. This exists so a fork can produce the same
+# artifacts as .azure-pipelines/azure-pipelines.yml without access to the
+# self-hosted Azure pools, and publish them in the same shape the Azure
+# pipeline publishes to PokemonAutomation/ComputerControl.
+#
+# Everything lives in this one file so that it rebases cleanly whenever
+# upstream changes are folded in. Do not spread it across other files.
+#
+# GitHub only lists workflows that exist on the default branch, so this file
+# stays on its own branch and the "ref" input picks what actually gets built.
+# The release is tagged against that commit, not against this branch.
+#
+# Differences from Azure that cannot be closed on a fork:
+#   - PA_OFFICIAL and the Internal/ sources come from Arduino-Source-Internal,
+#     which a fork cannot check out. Builds here are unofficial by definition.
+#   - MacOS is not built. Its Azure job depends on the apple-signing variable
+#     group for signing and notarization.
+#   - PrivateBeta (password-protected archives) is not offered, so IS_BETA is
+#     always false, matching a Commit/Beta/Release build on Azure.
+
+name: Fork Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or commit to build. Empty builds the branch this workflow was dispatched from.'
+        type: string
+        default: ''
+      buildType:
+        description: 'Build type. Only Beta and Release may be published.'
+        type: choice
+        options: [Commit, Beta, Release]
+        default: Commit
+      versionMajor:
+        type: string
+        default: '0'
+      versionMinor:
+        type: string
+        default: '0'
+      versionPatch:
+        type: string
+        default: '0'
+      publish:
+        description: 'Create a GitHub release on this fork.'
+        type: boolean
+        default: false
+      releaseSuffix:
+        description: 'Appended to the release tag and title, e.g. v0.69.19-beta-network-av. Empty for none.'
+        type: string
+        default: 'network-av'
+      changelogRepo:
+        description: 'Repository whose release (matched by tag) or ChangeLog.md supplies the upstream part of the release notes.'
+        type: string
+        default: 'PokemonAutomation/ComputerControl'
+
+env:
+  QT_VERSION: '6.10.2'
+  QT_MODULES: 'qtserialport qtmultimedia'
+
+jobs:
+  ###########################################
+  #           WINDOWS BUILD x64             #
+  ###########################################
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 90
+    outputs:
+      sha: ${{steps.checkout.outputs.commit}}
+
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+        with:
+          ref: ${{inputs.ref}}
+          submodules: 'recursive'
+
+      # Installed under C:/Qt so the layout matches Azure's agents exactly,
+      # which is also what CMakePresets.json's PREFERRED_QT_DIR expects.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall'
+          version: ${{env.QT_VERSION}}
+          modules: ${{env.QT_MODULES}}
+          dir: 'C:/'
+
+      # Azure runs VsDevCmd.bat before CMake, which is also what puts the
+      # Ninja that CMakePresets.json asks for on PATH.
+      #
+      # Clearing GITHUB_ACTIONS is load-bearing: SerialPrograms/CMakeLists.txt
+      # checks for it and sets QT_DEPLOY_FILES=FALSE, which turns windeployqt
+      # into a no-op. Azure has no such variable, so its builds are deployed.
+      - name: Configure and build
+        shell: cmd
+        run: |
+          set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+          for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
+          if not defined VSDIR echo ::error::Could not locate Visual Studio via vswhere. & exit /b 1
+          call "%VSDIR%\Common7\Tools\VsDevCmd.bat" -arch=x64 || exit /b 1
+          set GITHUB_ACTIONS=
+          cd SerialPrograms
+          cmake --preset=Publish ^
+            -DCMAKE_PREFIX_PATH=C:/Qt/${{env.QT_VERSION}}/msvc2022_64/lib/cmake ^
+            -DPREFERRED_QT_DIR=C:/Qt -DPREFERRED_QT_VER=${{env.QT_VERSION}} ^
+            -DIS_AZURE_BUILD=TRUE ^
+            -DVERSION_MAJOR=${{inputs.versionMajor}} ^
+            -DVERSION_MINOR=${{inputs.versionMinor}} ^
+            -DVERSION_PATCH=${{inputs.versionPatch}} ^
+            -DIS_BETA=false || exit /b 1
+          cmake --build --preset=Publish -j 16 || exit /b 1
+
+      - name: Create launcher script
+        shell: pwsh
+        run: |
+          $BUILD_DIR = "${{github.workspace}}/build/Publish/Output"
+          $lines = @(
+            'cd %~dp0'
+            ''
+            'if not exist Binaries64\ ('
+            '    echo.'
+            '    echo Please unzip the folder before you can use it.'
+            '    echo.'
+            '    pause'
+            '    exit'
+            ')'
+            ''
+            'if not exist Binaries64\SerialPrograms.exe ('
+            '    echo.'
+            '    echo Binaries\SerialPrograms.exe not found. Did your anti-virus delete it?'
+            '    echo.'
+            '    pause'
+            '    exit'
+            ')'
+            ''
+            'start "" Binaries64\SerialPrograms.exe'
+          )
+          Set-Content -Path "$BUILD_DIR/SerialPrograms-Windows.cmd" -Value $lines -Encoding ASCII
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $root = "${{github.workspace}}/build/Publish"
+          $BUILD_DIR = "$root/Output"
+          $BUILD_CACHE = "$root/cache-build"
+          $SYMBOLS_CACHE = "$root/cache-symbols"
+          $version = "${{inputs.versionMajor}}.${{inputs.versionMinor}}.${{inputs.versionPatch}}"
+
+          New-Item -ItemType Directory -Force -Path $BUILD_CACHE, $SYMBOLS_CACHE | Out-Null
+
+          function Invoke-Robocopy {
+              robocopy @args
+              if ($LASTEXITCODE -ge 8) { throw "Robocopy failed with exit code: $LASTEXITCODE" }
+          }
+
+          Write-Host "=== Excluding unnecessary files from deployment ==="
+          Remove-Item -Path "$BUILD_DIR/Binaries64/opencv_world4120d.dll" -ErrorAction SilentlyContinue
+          Remove-Item -Path "$BUILD_DIR/Binaries64/translations" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$BUILD_DIR/Binaries64/generic"      -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$BUILD_DIR/Scripts"                 -Recurse -Force -ErrorAction SilentlyContinue
+          Invoke-Robocopy $BUILD_DIR/Binaries64 $SYMBOLS_CACHE SerialPrograms.pdb
+          Remove-Item -Path "$BUILD_DIR/Binaries64/SerialPrograms.pdb" -ErrorAction SilentlyContinue
+          Invoke-Robocopy $BUILD_DIR $BUILD_CACHE /s
+
+          $folderName = "SerialPrograms-$version-Windows-x64"
+          Rename-Item "$root/cache-build" "$root/$folderName"
+          New-Item -ItemType Directory -Force -Path $BUILD_CACHE | Out-Null
+          & "C:/Program Files/7-Zip/7z.exe" a -tzip -mx=9 "$BUILD_CACHE/SerialPrograms-Windows-MSVC-x64.zip" "$root/$folderName"
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit code: $LASTEXITCODE" }
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-build
+          path: ${{github.workspace}}/build/Publish/cache-build/SerialPrograms-Windows-MSVC-x64.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-symbols
+          path: ${{github.workspace}}/build/Publish/cache-symbols
+
+  ###########################################
+  #            LINUX BUILD x64              #
+  ###########################################
+  linux:
+    name: Ubuntu x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      sha: ${{steps.checkout.outputs.commit}}
+
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+        with:
+          ref: ${{inputs.ref}}
+          submodules: 'recursive'
+
+      # qtwaylandcompositor is what linuxdeploy's EXTRA_QT_PLUGINS asks for
+      # below. On the Azure agents it comes with the system-wide /opt/Qt
+      # install. Note the name: aqt has no module called "qtwayland" - the
+      # Wayland client platform plugins are part of the base linux_gcc_64
+      # package, and only the compositor is a separate module.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall'
+          version: ${{env.QT_VERSION}}
+          modules: '${{env.QT_MODULES}} qtwaylandcompositor'
+
+      # The gstreamer packages are what linuxdeploy's "-p gstreamer" bundles
+      # below, and what the patched AppRun then forces Qt to use. The Azure
+      # agents are long-lived desktop machines that already have them; a fresh
+      # hosted runner does not.
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libopencv-dev libsystemd-dev p7zip-full
+          sudo apt install -y \
+            libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad gstreamer1.0-libav
+          sudo apt install -y ./3rdPartyBinaries/libdpp-10.1.5-linux-x64.deb
+
+      - name: Configure and build
+        run: |
+          cd SerialPrograms
+          env -u GITHUB_ACTIONS cmake --preset=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DIS_AZURE_BUILD=TRUE \
+            -DVERSION_MAJOR=${{inputs.versionMajor}} \
+            -DVERSION_MINOR=${{inputs.versionMinor}} \
+            -DVERSION_PATCH=${{inputs.versionPatch}} \
+            -DIS_BETA=false
+          env -u GITHUB_ACTIONS cmake --build --preset=RelWithDebInfo -j 16
+
+      - name: Extract debug symbols
+        run: |
+          set -e
+          cd "${{github.workspace}}/build/RelWithDebInfo"
+          objcopy --only-keep-debug SerialPrograms SerialPrograms.debug
+          objcopy --strip-debug SerialPrograms
+          objcopy --add-gnu-debuglink=SerialPrograms.debug SerialPrograms
+          mkdir -p cache-symbols
+          mv SerialPrograms.debug cache-symbols/SerialPrograms.debug
+
+      - name: Deploy AppImage
+        run: |
+          set -e
+          export LINUXDEPLOY_DISABLE_APPSTREAM=1
+
+          #  Hosted runners have no FUSE, so linuxdeploy and appimagetool
+          #  cannot self-mount and would abort. This makes them unpack
+          #  themselves instead. Azure's agents have libfuse2 and never hit it.
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export ARCH=x86_64
+
+          BUILD_DIR="${{github.workspace}}/build/RelWithDebInfo"
+          SRC_DIR="${{github.workspace}}"
+          APP_DIR="$BUILD_DIR/AppDir"
+          BUILD_CACHE_DIR="$BUILD_DIR/cache-build"
+
+          rm -rf "$APP_DIR"
+          mkdir -p "$APP_DIR/usr/bin" "$APP_DIR/usr/lib"
+          mkdir -p "$APP_DIR/usr/share/applications"
+          mkdir -p "$APP_DIR/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "$APP_DIR/usr/share/metainfo"
+          mkdir -p "$APP_DIR/usr/plugins/iconengines"
+          mkdir -p "$BUILD_CACHE_DIR"
+
+          cp -a "$QT_ROOT_DIR/plugins/iconengines/" "$APP_DIR/usr/plugins/iconengines/"
+          cp "$SRC_DIR/IconResource/SerialPrograms.desktop"     "$APP_DIR/usr/share/applications/"
+          cp "$SRC_DIR/IconResource/SerialPrograms.png"         "$APP_DIR/usr/share/icons/hicolor/256x256/apps/"
+          cp "$SRC_DIR/IconResource/SerialPrograms.appdata.xml" "$APP_DIR/usr/share/metainfo/"
+          cp "$BUILD_DIR/SerialPrograms" "$APP_DIR/usr/bin"
+
+          echo "=== Extracting Discord Social SDK ==="
+          DISCORD_DIR="$SRC_DIR/3rdPartyBinaries/discord_social_sdk_linux"
+          rm -rf "$DISCORD_DIR"
+          unzip -q "$SRC_DIR/3rdPartyBinaries/discord_social_sdk_linux.zip" -d "$SRC_DIR/3rdPartyBinaries"
+          DISCORD_SO="$DISCORD_DIR/lib/release/libdiscord_partner_sdk.so"
+
+          echo "=== Downloading linuxdeploy, Qt plugin, gstreamer plugin ==="
+          cd "$BUILD_DIR"
+          wget -nv https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -nv https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          wget -nv https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          wget -nv https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage appimagetool-x86_64.AppImage linuxdeploy-plugin-gstreamer.sh
+
+          echo "=== Copying Wayland platform plugins ==="
+          mkdir -p "$APP_DIR/usr/plugins/platforms"
+          cp "$QT_ROOT_DIR"/plugins/platforms/libqwayland*.so "$APP_DIR/usr/plugins/platforms/" 2>/dev/null || true
+          for d in wayland-decoration-client wayland-graphics-integration-client wayland-shell-integration; do
+              mkdir -p "$APP_DIR/usr/plugins/$d"
+              cp -a "$QT_ROOT_DIR/plugins/$d/." "$APP_DIR/usr/plugins/$d/" 2>/dev/null || true
+          done
+
+          echo "=== Running linuxdeploy to package AppImage ==="
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export EXTRA_QT_PLUGINS="multimedia;waylandcompositor"
+          ./linuxdeploy-x86_64.AppImage \
+              --appdir "$APP_DIR" \
+              -d "$APP_DIR/usr/share/applications/SerialPrograms.desktop" \
+              -i "$APP_DIR/usr/share/icons/hicolor/256x256/apps/SerialPrograms.png" \
+              -e "$APP_DIR/usr/bin/SerialPrograms" \
+              -l "$DISCORD_SO" \
+              -p qt \
+              -p gstreamer \
+              -v 3
+
+          rm -rf "$APP_DIR/usr/translations"
+
+          echo "=== Patching AppRun to force GStreamer backend ==="
+          sed -i '2i export PA_APPIMAGE_DIR=$(cd "$(dirname "$APPIMAGE")" && pwd)' "$APP_DIR/AppRun"
+          sed -i '2i export QT_MEDIA_BACKEND=gstreamer' "$APP_DIR/AppRun"
+          sed -i '2i if [ -n "$WAYLAND_DISPLAY" ] && [ -z "$QT_QPA_PLATFORM" ]; then export QT_QPA_PLATFORM=wayland; elif [ -z "$QT_QPA_PLATFORM" ]; then export QT_QPA_PLATFORM=xcb; fi' "$APP_DIR/AppRun"
+
+          #  LINUXDEPLOY_DISABLE_APPSTREAM above only covers linuxdeploy.
+          #  appimagetool runs its own appstreamcli validation, and
+          #  IconResource/SerialPrograms.appdata.xml does not pass it: the icon
+          #  type is "cached_file", which is not one of AppStream's types, and
+          #  the launchable names a desktop file that is not the one shipped.
+          #  Azure's agents have no appstreamcli, so the check is skipped there
+          #  and the metadata ships as-is. Skip it here too rather than diverge.
+          echo "=== Packaging AppImage ==="
+          ./appimagetool-x86_64.AppImage --no-appstream AppDir
+          rm linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage appimagetool-x86_64.AppImage
+
+          VERSION="${{inputs.versionMajor}}.${{inputs.versionMinor}}.${{inputs.versionPatch}}"
+          FOLDER_NAME="SerialPrograms-$VERSION-Ubuntu-x64"
+          mkdir -p "$FOLDER_NAME"
+          mv "SerialPrograms-x86_64.AppImage" "$FOLDER_NAME/SerialPrograms.AppImage"
+          chmod +x "$FOLDER_NAME/SerialPrograms.AppImage"
+          cp -a "$SRC_DIR/Packages/Firmware/"  "$FOLDER_NAME/"
+          cp -a "$SRC_DIR/Packages/Resources/" "$FOLDER_NAME/"
+          7z a -tzip -mx=9 "$BUILD_CACHE_DIR/SerialPrograms-Ubuntu-GCC-x64.zip" "$FOLDER_NAME"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-build
+          path: ${{github.workspace}}/build/RelWithDebInfo/cache-build/SerialPrograms-Ubuntu-GCC-x64.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-symbols
+          path: ${{github.workspace}}/build/RelWithDebInfo/cache-symbols
+
+  ###########################################
+  #             GITHUB RELEASE              #
+  ###########################################
+  release:
+    name: Create GitHub Release
+    needs: [windows, linux]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Reject unpublishable build types
+        if: inputs.buildType == 'Commit'
+        run: |
+          echo "::error::Azure only publishes Beta and Release builds. Re-run with buildType=Beta or Release."
+          exit 1
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-build
+          path: artifacts-windows
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-build
+          path: artifacts-linux
+
+      # Azure publishes ChangeLog.md verbatim as the release body. The closest
+      # thing to that for a fork build is the upstream release carrying the same
+      # tag as this one minus the fork suffix, so that is tried first, then the
+      # other flavour of the tag (Beta vs Release), then ChangeLog.md itself.
+      # Whatever is found gets a short section about the fork's own changes in
+      # front of it, since those are what this release adds on top of upstream.
+      - name: Assemble release notes
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          set -e
+          REPO="${{inputs.changelogRepo}}"
+          BUILT_SHA="${{needs.linux.outputs.sha}}"
+          BUILT_REF="${{inputs.ref || github.ref_name}}"
+
+          BASE_TAG="v${{inputs.versionMajor}}.${{inputs.versionMinor}}.${{inputs.versionPatch}}"
+          if [ "${{inputs.buildType}}" = "Beta" ]; then
+            CANDIDATES="${BASE_TAG}-beta ${BASE_TAG}"
+          else
+            CANDIDATES="${BASE_TAG} ${BASE_TAG}-beta"
+          fi
+
+          UPSTREAM_SOURCE=""
+          for TAG in $CANDIDATES; do
+            if gh api "repos/$REPO/releases/tags/$TAG" --jq '.body' > upstream-notes.md 2>/dev/null && [ -s upstream-notes.md ]; then
+              echo "Using the release notes of $REPO $TAG"
+              UPSTREAM_SOURCE="Upstream release notes from [$REPO $TAG](https://github.com/$REPO/releases/tag/$TAG):"
+              break
+            fi
+          done
+          if [ -z "$UPSTREAM_SOURCE" ]; then
+            if gh api "repos/$REPO/contents/ChangeLog.md" --jq '.content' 2>/dev/null | base64 -d > upstream-notes.md && [ -s upstream-notes.md ]; then
+              echo "No release named $CANDIDATES in $REPO. Using its ChangeLog.md."
+              UPSTREAM_SOURCE="Upstream release notes from ChangeLog.md in $REPO:"
+            else
+              echo "No release notes found in $REPO."
+              : > upstream-notes.md
+            fi
+          fi
+
+          {
+            if [ -n "${{inputs.releaseSuffix}}" ]; then
+              cat <<'NOTES'
+          **Fork changes (network-av):**
+          - **Network Stream** video input: use an HTTP, MJPEG or RTSP stream (anything the FFmpeg media backend can open) as the console's video feed instead of a local capture card. The setup dialog tests the connection, shows a preview and measures the frame rate. Pressing "Reset Video" while it is selected reopens the dialog.
+          - **Network Audio Stream** input: raw PCM audio over TCP (`tcp://host:port`). The setup dialog checks the incoming data rate against the selected sample format and flags a mismatch. The socket runs on its own thread, so a stalled stream no longer freezes the UI.
+          - **End-to-End Latency Tester** program (under Testing): measures how long a controller input takes to come back as video and audio, for tuning the network path above.
+
+          NOTES
+            fi
+            echo "Unofficial build of ${{github.repository}} at ${BUILT_REF} (${BUILT_SHA:0:9}), on top of upstream ${BASE_TAG}."
+            echo
+            if [ -s upstream-notes.md ]; then
+              echo "---"
+              echo
+              echo "$UPSTREAM_SOURCE"
+              echo
+              cat upstream-notes.md
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Rename artifacts
+        run: |
+          set -e
+          VERSION="${{inputs.versionMajor}}.${{inputs.versionMinor}}.${{inputs.versionPatch}}"
+          BUILD_DATE=$(date -u +%Y%m%d)
+
+          WIN_ARTIFACT=$(find artifacts-windows -name '*.zip' -type f | head -n 1)
+          LINUX_ARTIFACT=$(find artifacts-linux -name '*.zip' -type f | head -n 1)
+          [ -f "$WIN_ARTIFACT" ]   || { echo "Windows artifact not found"; exit 1; }
+          [ -f "$LINUX_ARTIFACT" ] || { echo "Linux artifact not found"; exit 1; }
+
+          mv "$WIN_ARTIFACT"   "PA-SerialPrograms-Windows-x64-${VERSION}-${BUILD_DATE}.zip"
+          mv "$LINUX_ARTIFACT" "PA-SerialPrograms-Ubuntu-x64-${VERSION}-${BUILD_DATE}.zip"
+          ls -l PA-SerialPrograms-*.zip
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          set -e
+          RELEASE_VERSION="v${{inputs.versionMajor}}.${{inputs.versionMinor}}.${{inputs.versionPatch}}"
+          if [ "${{inputs.buildType}}" = "Beta" ]; then
+            RELEASE_VERSION="${RELEASE_VERSION}-beta"
+          fi
+          if [ -n "${{inputs.releaseSuffix}}" ]; then
+            RELEASE_VERSION="${RELEASE_VERSION}-${{inputs.releaseSuffix}}"
+          fi
+
+          if gh release view "$RELEASE_VERSION" --repo "${{github.repository}}" >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION already exists. Deleting..."
+            gh release delete "$RELEASE_VERSION" --repo "${{github.repository}}" --yes --cleanup-tag
+          fi
+
+          if [ "${{inputs.buildType}}" = "Beta" ]; then
+            gh release create "$RELEASE_VERSION" \
+              --repo "${{github.repository}}" \
+              --title "Version $RELEASE_VERSION" \
+              --notes-file release-notes.md \
+              --prerelease \
+              --target "${{needs.linux.outputs.sha}}"
+          else
+            gh release create "$RELEASE_VERSION" \
+              --repo "${{github.repository}}" \
+              --title "SerialPrograms $RELEASE_VERSION" \
+              --notes-file release-notes.md \
+              --target "${{needs.linux.outputs.sha}}"
+          fi
+
+          for f in PA-SerialPrograms-*.zip; do
+            echo "Uploading $f"
+            gh release upload "$RELEASE_VERSION" "$f" --repo "${{github.repository}}" --clobber
+          done
+
+          echo "Release URL: https://github.com/${{github.repository}}/releases/tag/$RELEASE_VERSION"
