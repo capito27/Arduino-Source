@@ -80,10 +80,15 @@ jobs:
 
       # Installed under C:/Qt so the layout matches Azure's agents exactly,
       # which is also what CMakePresets.json's PREFERRED_QT_DIR expects.
+      #
+      # This uses the released aqtinstall, not upstream CI's git aqtsource. The
+      # git version requires py7zr>=1.1.3, overriding the action's py7zr pin,
+      # and py7zr 1.1.x intermittently rejects Qt's archives on Windows
+      # ("Bad7zFile: Specified path is bad"). The issue the git version works
+      # around, aqtinstall#1007, only affects Qt 6.11.
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          aqtsource: 'git+https://github.com/miurahr/aqtinstall'
           version: ${{env.QT_VERSION}}
           modules: ${{env.QT_MODULES}}
           dir: 'C:/'
@@ -207,7 +212,6 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          aqtsource: 'git+https://github.com/miurahr/aqtinstall'
           version: ${{env.QT_VERSION}}
           modules: '${{env.QT_MODULES}} qtwaylandcompositor'
 
